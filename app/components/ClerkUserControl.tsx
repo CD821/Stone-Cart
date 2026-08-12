@@ -2,9 +2,7 @@
 
 import { SignInButton, UserButton, useUser } from "@clerk/react";
 
-const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as
-  | string
-  | undefined;
+const clerkPublishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
 export default function ClerkUserControl() {
   if (!clerkPublishableKey) return null;
