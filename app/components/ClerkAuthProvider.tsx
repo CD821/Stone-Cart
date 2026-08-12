@@ -1,6 +1,6 @@
 "use client";
 
-import { ClerkProvider } from "@clerk/react";
+import { ClerkProvider, SignInButton, useUser } from "@clerk/react";
 
 const clerkPublishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
@@ -15,7 +15,54 @@ export default function ClerkAuthProvider({
 
   return (
     <ClerkProvider publishableKey={clerkPublishableKey} afterSignOutUrl="/">
-      {children}
+      <RequireAuth>{children}</RequireAuth>
     </ClerkProvider>
   );
+}
+
+function RequireAuth({ children }: { children: React.ReactNode }) {
+  const { isLoaded, isSignedIn } = useUser();
+
+  if (!isLoaded) {
+    return (
+      <main className="auth-screen" aria-label="Loading StoneCart">
+        <section className="auth-card">
+          <div className="brand auth-brand">
+            <div className="brand-mark">SC</div>
+            <div>
+              <p>StoneCart</p>
+              <span>Fabrication control</span>
+            </div>
+          </div>
+          <div className="auth-loader" aria-hidden="true" />
+        </section>
+      </main>
+    );
+  }
+
+  if (!isSignedIn) {
+    return (
+      <main className="auth-screen" aria-label="StoneCart sign in">
+        <section className="auth-card">
+          <div className="brand auth-brand">
+            <div className="brand-mark">SC</div>
+            <div>
+              <p>StoneCart</p>
+              <span>Fabrication control</span>
+            </div>
+          </div>
+          <div className="auth-copy">
+            <p className="eyebrow">Secure access</p>
+            <h1>Sign in to manage stone carts.</h1>
+            <p>Installer checkouts, returns, cart history, and admin controls are only available after sign in.</p>
+          </div>
+          <SignInButton mode="modal">
+            <button className="primary-action auth-sign-in">Sign In</button>
+          </SignInButton>
+        </section>
+      </main>
+    );
+  }
+
+  return <>{children}</>;
 }
