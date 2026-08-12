@@ -212,7 +212,7 @@ const roleAccess: Record<AppRole, {
 };
 
 function normalizeRole(value: unknown): AppRole {
-  return validRoles.find((role) => role.toLowerCase() === String(value ?? "").toLowerCase()) ?? "Admin";
+  return validRoles.find((role) => role.toLowerCase() === String(value ?? "").toLowerCase()) ?? "Installer";
 }
 
 export default function StoneCartApp({ page = "dashboard" }: { page?: PageKey }) {

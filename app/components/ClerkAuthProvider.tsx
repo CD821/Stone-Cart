@@ -70,7 +70,7 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   return (
     <AuthRoleProvider
       value={{
-        role: String(user?.publicMetadata?.role ?? "Admin"),
+        role: String(user?.publicMetadata?.role ?? "Installer"),
         name: user?.fullName || user?.primaryEmailAddress?.emailAddress || "Carlos",
       }}
     >

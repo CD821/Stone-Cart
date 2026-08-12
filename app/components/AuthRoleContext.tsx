@@ -8,7 +8,7 @@ type AuthRoleContextValue = {
 };
 
 const AuthRoleContext = createContext<AuthRoleContextValue>({
-  role: "Admin",
+  role: "Installer",
   name: "Carlos",
 });
 
