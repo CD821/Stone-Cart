@@ -1,6 +1,7 @@
 "use client";
 
 import { ClerkProvider, SignInButton, useUser } from "@clerk/react";
+import { AuthRoleProvider } from "./AuthRoleContext";
 
 const clerkPublishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
@@ -21,7 +22,7 @@ export default function ClerkAuthProvider({
 }
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
-  const { isLoaded, isSignedIn } = useUser();
+  const { isLoaded, isSignedIn, user } = useUser();
 
   if (!isLoaded) {
     return (
@@ -66,5 +67,14 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
     );
   }
 
-  return <>{children}</>;
+  return (
+    <AuthRoleProvider
+      value={{
+        role: String(user?.publicMetadata?.role ?? "Admin"),
+        name: user?.fullName || user?.primaryEmailAddress?.emailAddress || "Carlos",
+      }}
+    >
+      {children}
+    </AuthRoleProvider>
+  );
 }

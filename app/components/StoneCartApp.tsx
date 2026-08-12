@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useAuthRole } from "./AuthRoleContext";
 import ClerkUserControl from "./ClerkUserControl";
 
 type Status =
@@ -133,6 +134,7 @@ function normalizeInstallers(savedInstallers?: Installer[] | string[]) {
 }
 
 type PageKey = "dashboard" | "carts" | "installers" | "history" | "admin";
+type AppRole = "Admin" | "Manager" | "Employee" | "Installer";
 type SortKey = "id" | "status" | "installer" | "checkoutDate" | "daysOut" | "location";
 type InstallerSortKey = "name" | "assigned" | "status";
 type PolicySettings = {
@@ -146,8 +148,75 @@ const initialPolicySettings: PolicySettings = {
   missingDays: 5,
   roles: "Admin, Manager, Employee, Installer",
 };
+const validRoles: AppRole[] = ["Admin", "Manager", "Employee", "Installer"];
+const roleAccess: Record<AppRole, {
+  summary: string;
+  permissions: string[];
+  checkout: boolean;
+  returnCart: boolean;
+  manageCarts: boolean;
+  viewInstallers: boolean;
+  manageInstallers: boolean;
+  viewHistory: boolean;
+  viewNotifications: boolean;
+  viewAdmin: boolean;
+}> = {
+  Admin: {
+    summary: "Full system access",
+    permissions: ["Full access", "Edit policy", "Manage carts", "Manage installers", "View all history"],
+    checkout: true,
+    returnCart: true,
+    manageCarts: true,
+    viewInstallers: true,
+    manageInstallers: true,
+    viewHistory: true,
+    viewNotifications: true,
+    viewAdmin: true,
+  },
+  Manager: {
+    summary: "Daily operations and exceptions",
+    permissions: ["Check out carts", "Return carts", "Manage carts", "Manage installers", "View all history"],
+    checkout: true,
+    returnCart: true,
+    manageCarts: true,
+    viewInstallers: true,
+    manageInstallers: true,
+    viewHistory: true,
+    viewNotifications: true,
+    viewAdmin: false,
+  },
+  Employee: {
+    summary: "Standard checkout desk access",
+    permissions: ["Check out carts", "Return carts", "View carts", "View installers", "View history"],
+    checkout: true,
+    returnCart: true,
+    manageCarts: false,
+    viewInstallers: true,
+    manageInstallers: false,
+    viewHistory: true,
+    viewNotifications: false,
+    viewAdmin: false,
+  },
+  Installer: {
+    summary: "Assigned cart visibility",
+    permissions: ["View assigned carts", "View own cart history"],
+    checkout: false,
+    returnCart: false,
+    manageCarts: false,
+    viewInstallers: false,
+    manageInstallers: false,
+    viewHistory: false,
+    viewNotifications: false,
+    viewAdmin: false,
+  },
+};
+
+function normalizeRole(value: unknown): AppRole {
+  return validRoles.find((role) => role.toLowerCase() === String(value ?? "").toLowerCase()) ?? "Admin";
+}
 
 export default function StoneCartApp({ page = "dashboard" }: { page?: PageKey }) {
+  const authRole = useAuthRole();
   const [carts, setCarts] = useState(initialCarts);
   const [installers, setInstallers] = useState(initialInstallers);
   const [search, setSearch] = useState("");
@@ -182,17 +251,36 @@ export default function StoneCartApp({ page = "dashboard" }: { page?: PageKey })
   const [installerSortDirection, setInstallerSortDirection] = useState<"asc" | "desc">("asc");
   const [policySettings, setPolicySettings] = useState(initialPolicySettings);
 
+  const userRole = normalizeRole(authRole.role);
+  const access = roleAccess[userRole];
+  const userName = authRole.name;
+  const matchedInstaller = installers.find((installer) => installer.name.toLowerCase() === authRole.name.toLowerCase());
+  const currentInstallerName = userRole === "Installer" ? matchedInstaller?.name : selectedInstaller;
+  const allowedNavItems = navItems.filter((item) => {
+    if (item.label === "Admin") return access.viewAdmin;
+    if (item.label === "Installers") return access.viewInstallers;
+    if (item.label === "History") return access.viewHistory;
+    return true;
+  });
+  const pageAllowed =
+    page === "dashboard" ||
+    page === "carts" ||
+    (page === "installers" && access.viewInstallers) ||
+    (page === "history" && access.viewHistory) ||
+    (page === "admin" && access.viewAdmin);
   const selectedCheckoutCart = carts.find((cart) => cart.id === checkoutCart);
   const selectedReturnedCart = carts.find((cart) => cart.id === returnedCart);
-  const outstandingForInstaller = carts.filter((cart) => cart.installer === selectedInstaller && cart.status !== "AVAILABLE");
   const availableCarts = carts.filter((cart) => cart.status === "AVAILABLE");
   const returnableCarts = carts.filter((cart) => ["CHECKED OUT", "OVERDUE", "MISSING"].includes(cart.status));
-  const show = (section: PageKey) => page === "dashboard" || page === section;
-  const showOnly = (section: PageKey) => page === section;
+  const show = (section: PageKey) => pageAllowed && (page === "dashboard" || page === section);
+  const showOnly = (section: PageKey) => pageAllowed && page === section;
 
   const filteredCarts = useMemo(() => {
     const query = search.trim().toLowerCase();
-    const filtered = carts.filter((cart) => {
+    const roleFilteredCarts = userRole === "Installer"
+      ? carts.filter((cart) => cart.installer === currentInstallerName && cart.status !== "AVAILABLE")
+      : carts;
+    const filtered = roleFilteredCarts.filter((cart) => {
       const matchesFilter = filter === "ALL" || cart.status === filter;
       const matchesQuery = !query || [cart.id, cart.serial, cart.status, cart.installer ?? "", cart.location].join(" ").toLowerCase().includes(query);
       return matchesFilter && matchesQuery;
@@ -205,7 +293,7 @@ export default function StoneCartApp({ page = "dashboard" }: { page?: PageKey })
         : String(aValue).localeCompare(String(bValue), undefined, { numeric: true });
       return sortDirection === "asc" ? result : -result;
     });
-  }, [carts, filter, search, sortDirection, sortKey]);
+  }, [carts, currentInstallerName, filter, search, sortDirection, sortKey, userRole]);
 
   const visibleCarts = page === "dashboard"
     ? filteredCarts.filter((cart) => cart.installer && cart.status !== "AVAILABLE")
@@ -286,7 +374,7 @@ export default function StoneCartApp({ page = "dashboard" }: { page?: PageKey })
     return () => window.removeEventListener("keydown", handleKeyDown);
   });
 
-  function record(event: string, actor = "Carlos") {
+  function record(event: string, actor = userName) {
     setHistory((items) => [[nowLabel, event, actor], ...items]);
   }
 
@@ -344,6 +432,10 @@ export default function StoneCartApp({ page = "dashboard" }: { page?: PageKey })
   }
 
   function openCheckoutModal() {
+    if (!access.checkout) {
+      setMessage(`${userRole} role cannot check out carts.`);
+      return;
+    }
     setCheckoutCart("");
     setCheckoutInstaller("");
     setCheckoutLocation("");
@@ -351,6 +443,10 @@ export default function StoneCartApp({ page = "dashboard" }: { page?: PageKey })
   }
 
   function openReturnModal() {
+    if (!access.returnCart) {
+      setMessage(`${userRole} role cannot return carts.`);
+      return;
+    }
     setReturnedCart("");
     setReturnModalOpen(true);
   }
@@ -364,6 +460,10 @@ export default function StoneCartApp({ page = "dashboard" }: { page?: PageKey })
   const returnedCartHistory = returnedCart ? history.filter((item) => item.join(" ").includes(returnedCart)) : [];
 
   function checkOutCart() {
+    if (!access.checkout) {
+      setMessage(`${userRole} role cannot check out carts.`);
+      return;
+    }
     const cart = carts.find((item) => item.id === checkoutCart);
     if (!cart || cart.status !== "AVAILABLE") {
       setMessage(checkoutCart ? `${checkoutCart} is not available for checkout.` : "Select a cart before checking out.");
@@ -382,11 +482,15 @@ export default function StoneCartApp({ page = "dashboard" }: { page?: PageKey })
     setSelectedInstaller(checkoutInstaller);
     setCheckoutLocation("");
     setCheckoutModalOpen(false);
-    record(`${checkoutCart} checked out to ${checkoutInstaller} at ${location}`, "Issued by Carlos");
+    record(`${checkoutCart} checked out to ${checkoutInstaller} at ${location}`, `Issued by ${userName}`);
     setMessage(`${checkoutCart} checked out to ${checkoutInstaller}.`);
   }
 
   function completeReturn() {
+    if (!access.returnCart) {
+      setMessage(`${userRole} role cannot return carts.`);
+      return;
+    }
     const cart = carts.find((item) => item.id === returnedCart);
     if (!cart) {
       setMessage("Select a returned cart before completing the return.");
@@ -397,12 +501,16 @@ export default function StoneCartApp({ page = "dashboard" }: { page?: PageKey })
       ? { ...item, status: "AVAILABLE", installer: undefined, checkoutDate: undefined, daysOut: undefined, returnDate: "Aug 11, 2026", location: "Shop bay 2", notes: "Returned and verified" } as Cart
       : item));
     setReturnModalOpen(false);
-    record(`${returnedCart} returned by ${cart.installer ?? "installer"}`, "Received by Carlos");
+    record(`${returnedCart} returned by ${cart.installer ?? "installer"}`, `Received by ${userName}`);
     setReturnedCart("");
     setMessage(`${returnedCart} return completed and marked AVAILABLE.`);
   }
 
   function addCart() {
+    if (!access.manageCarts) {
+      setMessage(`${userRole} role cannot add carts.`);
+      return;
+    }
     const id = normalizeCartId(newCartId);
     if (!/^CART-\d{3,}$/.test(id)) {
       setMessage("Enter a valid Cart ID, such as CART-051.");
@@ -418,11 +526,15 @@ export default function StoneCartApp({ page = "dashboard" }: { page?: PageKey })
     setFilter("ALL");
     setNewCartId("");
     setCartModalOpen(false);
-    record(`${id} added to inventory`, "Added by Carlos");
+    record(`${id} added to inventory`, `Added by ${userName}`);
     setMessage(`${id} added and ready for checkout.`);
   }
 
   function addInstaller() {
+    if (!access.manageInstallers) {
+      setMessage(`${userRole} role cannot add installers.`);
+      return;
+    }
     const name = newInstallerName.trim();
     if (!name) {
       setMessage("Enter an installer name before confirming.");
@@ -438,27 +550,43 @@ export default function StoneCartApp({ page = "dashboard" }: { page?: PageKey })
     setCheckoutInstaller(name);
     setNewInstallerName("");
     setInstallerModalOpen(false);
-    record(`${name} added as an installer`, "Added by Carlos");
+    record(`${name} added as an installer`, `Added by ${userName}`);
     setMessage(`${name} added as an installer.`);
   }
 
   function showMyCarts() {
-    setSelectedInstaller("Jorge Bocanegra");
-    setSearch("Jorge Bocanegra");
+    if (userRole === "Installer" && !currentInstallerName) {
+      setSearch("");
+      setFilter("ALL");
+      setMessage("No installer profile is linked to this signed-in account yet.");
+      window.location.href = "/carts";
+      return;
+    }
+    const installerName = currentInstallerName ?? "Jorge Bocanegra";
+    setSelectedInstaller(installerName);
+    setSearch(installerName);
     setFilter("ALL");
-    setMessage("Showing Jorge Bocanegra's current carts.");
+    setMessage(`Showing ${installerName}'s current carts.`);
     window.location.href = "/carts";
   }
 
   function toggleInstallerActive(name: string) {
+    if (!access.manageInstallers) {
+      setMessage(`${userRole} role cannot change installer access.`);
+      return;
+    }
     const installer = installers.find((item) => item.name === name);
     if (!installer) return;
     setInstallers((items) => items.map((item) => item.name === name ? { ...item, active: !item.active } : item));
-    record(`${name} marked ${installer.active ? "inactive" : "active"}`, "Updated by Carlos");
+    record(`${name} marked ${installer.active ? "inactive" : "active"}`, `Updated by ${userName}`);
     setMessage(`${name} is now ${installer.active ? "inactive" : "active"}.`);
   }
 
   function saveInstallerName() {
+    if (!access.manageInstallers) {
+      setMessage(`${userRole} role cannot edit installer names.`);
+      return;
+    }
     if (!selectedInstallerDetail) return;
     const nextName = editedInstallerName.trim();
     if (!nextName) {
@@ -475,7 +603,7 @@ export default function StoneCartApp({ page = "dashboard" }: { page?: PageKey })
     setHistory((items) => items.map(([time, event, actor]) => [time, event.replaceAll(selectedInstallerDetail, nextName), actor.replaceAll(selectedInstallerDetail, nextName)]));
     if (selectedInstaller === selectedInstallerDetail) setSelectedInstaller(nextName);
     if (checkoutInstaller === selectedInstallerDetail) setCheckoutInstaller(nextName);
-    record(`${selectedInstallerDetail} renamed to ${nextName}`, "Updated by Carlos");
+    record(`${selectedInstallerDetail} renamed to ${nextName}`, `Updated by ${userName}`);
     setSelectedInstallerDetail(nextName);
     setInstallerNameEditing(false);
     setMessage(`${selectedInstallerDetail} renamed to ${nextName}.`);
@@ -486,28 +614,36 @@ export default function StoneCartApp({ page = "dashboard" }: { page?: PageKey })
       <aside className="sidebar" aria-label="Primary navigation">
         <div className="brand"><div className="brand-mark">SC</div><div><p>StoneCart</p><span>Fabrication control</span></div></div>
         <nav>
-          {navItems.map((item) => (
+          {allowedNavItems.map((item) => (
             <a className={(item.label === "Dashboard" && page === "dashboard") || routes[item.label] === `/${page}` ? "active" : ""} href={routes[item.label]} key={item.label}>
               <span className={`nav-icon ${item.icon}`} aria-hidden="true" />{item.label}
             </a>
           ))}
         </nav>
-        <div className="profile-chip"><strong>Carlos</strong><span>Manager access</span></div>
+        <div className="profile-chip"><strong>{userName}</strong><span>{userRole} access</span></div>
       </aside>
 
       <section className="workspace">
         <header className="topbar">
           <div className="quick-actions" aria-label="Mobile quick actions">
-            <button onClick={openCheckoutModal}>Check Out</button>
-            <button onClick={openReturnModal}>Return</button>
+            {access.checkout && <button onClick={openCheckoutModal}>Check Out</button>}
+            {access.returnCart && <button onClick={openReturnModal}>Return</button>}
             <button onClick={showMyCarts}>My Carts</button>
-            <button className="notification-button" aria-label="Notifications" onClick={() => setNotificationModalOpen(true)}>
+            {access.viewNotifications && <button className="notification-button" aria-label="Notifications" onClick={() => setNotificationModalOpen(true)}>
               <span className="notification-glyph" aria-hidden="true" />
               <span className="notification-count">{notifications.length}</span>
-            </button>
+            </button>}
             <ClerkUserControl />
           </div>
         </header>
+
+        {!pageAllowed && (
+          <section className="panel access-panel">
+            <p className="eyebrow">Restricted area</p>
+            <h2>{userRole} access does not include this page.</h2>
+            <p>{access.summary}. Use the available navigation links for this role.</p>
+          </section>
+        )}
 
         {show("carts") && <section className="search-panel" id="dashboard">
           <label htmlFor="global-search">Global search</label>
@@ -528,7 +664,7 @@ export default function StoneCartApp({ page = "dashboard" }: { page?: PageKey })
         </section>}
 
         {show("carts") && <section className="panel table-panel" id="carts">
-          <div className="panel-heading"><div><p className="eyebrow">Inventory</p>{page === "dashboard" && <h2>Carts currently out</h2>}</div><button className="secondary-action" onClick={() => setCartModalOpen(true)}>Add Cart</button></div>
+          <div className="panel-heading"><div><p className="eyebrow">Inventory</p>{page === "dashboard" && <h2>Carts currently out</h2>}</div>{access.manageCarts && <button className="secondary-action" onClick={() => setCartModalOpen(true)}>Add Cart</button>}</div>
           <div className="cart-table" role="table" aria-label="Cart inventory">
             <div className="table-row table-head" role="row">
               {[
@@ -556,7 +692,7 @@ export default function StoneCartApp({ page = "dashboard" }: { page?: PageKey })
         {(showOnly("installers") || showOnly("admin")) && <section className="tri-layout">
           {showOnly("installers") && (
           <article className="panel" id="installers">
-            <div className="panel-heading"><div><p className="eyebrow">Installers</p><h2>Installer possession list</h2></div><button className="secondary-action" onClick={() => setInstallerModalOpen(true)}>Add Installer</button></div>
+            <div className="panel-heading"><div><p className="eyebrow">Installers</p><h2>Installer possession list</h2></div>{access.manageInstallers && <button className="secondary-action" onClick={() => setInstallerModalOpen(true)}>Add Installer</button>}</div>
             <div className="installer-table">
               <div className="installer-row installer-head">
                 {[
@@ -612,6 +748,19 @@ export default function StoneCartApp({ page = "dashboard" }: { page?: PageKey })
             <div className="setting-row">
               <span>Roles</span>
               <input className="roles-input" value={policySettings.roles} onChange={(event) => setPolicySettings((settings) => ({ ...settings, roles: event.target.value }))} />
+            </div>
+            <div className="permission-grid" aria-label="Role permissions">
+              {validRoles.map((role) => (
+                <div className="permission-card" key={role}>
+                  <div>
+                    <strong>{role}</strong>
+                    <span>{roleAccess[role].summary}</span>
+                  </div>
+                  <ul>
+                    {roleAccess[role].permissions.map((permission) => <li key={permission}>{permission}</li>)}
+                  </ul>
+                </div>
+              ))}
             </div>
           </article>
           )}
@@ -670,7 +819,7 @@ export default function StoneCartApp({ page = "dashboard" }: { page?: PageKey })
             <label>Cart to issue<select value={checkoutCart} onChange={(event) => setCheckoutCart(event.target.value)}><option value="">Select cart</option>{availableCarts.map((cart) => <option key={cart.id}>{cart.id}</option>)}</select></label>
             <label>Installer receiving cart<select value={checkoutInstaller} onChange={(event) => setCheckoutInstaller(event.target.value)}><option value="">Select installer</option>{activeInstallers.map((installer) => <option key={installer.id}>{installer.name}</option>)}</select></label>
             <label>Location<input value={checkoutLocation} onChange={(event) => setCheckoutLocation(event.target.value)} placeholder="Jobsite, address, or shop area" /></label>
-            <div className="receipt"><span>Cart ID</span><strong>{checkoutCart}</strong><span>Issued by</span><strong>Carlos</strong><span>Checkout time</span><strong>{nowLabel}</strong><span>Installer</span><strong>{checkoutInstaller}</strong><span>Location</span><strong>{checkoutLocation}</strong></div>
+            <div className="receipt"><span>Cart ID</span><strong>{checkoutCart}</strong><span>Issued by</span><strong>{userName}</strong><span>Checkout time</span><strong>{nowLabel}</strong><span>Installer</span><strong>{checkoutInstaller}</strong><span>Location</span><strong>{checkoutLocation}</strong></div>
             <div className="action-row modal-actions">
               <button className="secondary-action" onClick={() => setCheckoutModalOpen(false)}>Cancel</button>
               <button className="primary-action" onClick={checkOutCart} disabled={!checkoutCart || !checkoutInstaller}>Check Out Cart</button>
@@ -771,14 +920,14 @@ export default function StoneCartApp({ page = "dashboard" }: { page?: PageKey })
               {!history.some((item) => item.join(" ").includes(selectedInstallerDetail)) && <li><span>No history yet</span><strong>New installer profile</strong><p>Future checkout and return activity will appear here.</p></li>}
             </ol>
             <div className="action-row modal-actions">
-              {installerNameEditing ? (
+              {access.manageInstallers && (installerNameEditing ? (
                 <button className="secondary-action" onClick={saveInstallerName}>Save name</button>
               ) : (
                 <button className="secondary-action" onClick={() => setInstallerNameEditing(true)}>Edit name</button>
-              )}
-              <button className="secondary-action" onClick={() => toggleInstallerActive(selectedInstallerDetail)}>
+              ))}
+              {access.manageInstallers && <button className="secondary-action" onClick={() => toggleInstallerActive(selectedInstallerDetail)}>
                 {installerDetails?.active ? "Make inactive" : "Make active"}
-              </button>
+              </button>}
               <button className="primary-action" onClick={closeModals}>Done</button>
             </div>
           </section>
