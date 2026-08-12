@@ -52,13 +52,15 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
             </div>
           </div>
           <div className="auth-copy">
-            <p className="eyebrow">Secure access</p>
-            <h1>Sign in to manage stone carts.</h1>
-            <p>Installer checkouts, returns, cart history, and admin controls are only available after sign in.</p>
+            <h1>Sign in to StoneCart</h1>
+            <p>Manage cart checkouts, returns, inventory, and activity from one secure workspace.</p>
           </div>
           <SignInButton mode="modal">
             <button className="primary-action auth-sign-in">Sign In</button>
           </SignInButton>
+          <p className="auth-security-note">
+            <span aria-hidden="true" />Secure access for authorized StoneCart users
+          </p>
         </section>
       </main>
     );
